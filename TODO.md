@@ -35,7 +35,7 @@ Build a fast, Excel-like spreadsheet app that runs entirely in the browser (with
   - Recalc dependency graph (topological order), cycle detection
 - **Formatting (minimum)**
 - [x] Number vs text handling
-  - Basic cell formatting: bold/italic, alignment (optional in Phase 1)
+- [x] Basic cell formatting: bold/italic, alignment (optional in Phase 1)
 - **Persistence**
   - Save/load workbook to IndexedDB automatically
   - Export/import as CSV (single sheet)

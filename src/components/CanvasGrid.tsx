@@ -5,11 +5,12 @@ import {
   useImperativeHandle,
   useRef,
   useState,
+  type ClipboardEvent,
   type KeyboardEvent,
   type PointerEvent,
 } from 'react'
 import { getCellKey } from '../utils/cellKey'
-import { cellsToCsv, csvToCells } from '../utils/csv'
+import { cellsToCsv, csvToCells, parseDelimitedText } from '../utils/csv'
 import { calculateDisplayCells } from '../utils/formulas'
 import { clearWorkbook, loadWorkbook, saveWorkbook } from '../utils/persistence'
 
@@ -22,6 +23,12 @@ type HistoryEntry = {
   key: string
   prev: string | null
   next: string | null
+}
+
+type CellFormat = {
+  bold?: boolean
+  italic?: boolean
+  align?: 'left' | 'center' | 'right'
 }
 
 const GRID_CONFIG = {
@@ -40,7 +47,8 @@ const GRID_STYLES = {
 
 const TEXT_STYLES = {
   color: '#1e293b',
-  font: '14px "Inter", system-ui, sans-serif',
+  fontSize: 14,
+  fontFamily: '"Inter", system-ui, sans-serif',
   paddingX: 8,
 }
 
@@ -59,10 +67,35 @@ function getVisibleRange(
   return { start, end }
 }
 
+function normalizeFormat(format: CellFormat) {
+  const normalized: CellFormat = {
+    bold: Boolean(format.bold),
+    italic: Boolean(format.italic),
+    align: format.align ?? 'left',
+  }
+  if (!normalized.bold && !normalized.italic && normalized.align === 'left') {
+    return null
+  }
+  return normalized
+}
+
+function getCellFont(format: CellFormat | undefined) {
+  const weight = format?.bold ? 600 : 400
+  const style = format?.italic ? 'italic ' : ''
+  return `${style}${weight} ${TEXT_STYLES.fontSize}px ${TEXT_STYLES.fontFamily}`
+}
+
+function getCellAlign(format: CellFormat | undefined): CanvasTextAlign {
+  return format?.align ?? 'left'
+}
+
 export type CanvasGridHandle = {
   resetWorkbook: () => void
   exportCsv: () => void
   importCsvFile: (file: File) => Promise<void>
+  toggleBold: () => void
+  toggleItalic: () => void
+  setAlignment: (align: 'left' | 'center' | 'right') => void
 }
 
 const CanvasGrid = forwardRef<CanvasGridHandle>(function CanvasGrid(_, ref) {
@@ -73,6 +106,8 @@ const CanvasGrid = forwardRef<CanvasGridHandle>(function CanvasGrid(_, ref) {
   const [cells, setCells] = useState<Map<string, string>>(() => new Map())
   const cellsRef = useRef<Map<string, string>>(new Map())
   const displayRef = useRef<Map<string, string>>(new Map())
+  const [formats, setFormats] = useState<Map<string, CellFormat>>(() => new Map())
+  const formatsRef = useRef<Map<string, CellFormat>>(new Map())
   const [, setUndoStack] = useState<HistoryEntry[]>([])
   const [, setRedoStack] = useState<HistoryEntry[]>([])
   const frameRef = useRef<number | null>(null)
@@ -164,17 +199,39 @@ const CanvasGrid = forwardRef<CanvasGridHandle>(function CanvasGrid(_, ref) {
       }
     }
 
-    ctx.font = TEXT_STYLES.font
+    ctx.font = getCellFont(undefined)
     ctx.fillStyle = TEXT_STYLES.color
     ctx.textBaseline = 'middle'
+    ctx.textAlign = 'left'
+    let lastFont = ctx.font
+    let lastAlign: CanvasTextAlign = 'left'
 
     for (let row = visibleRows.start; row <= visibleRows.end; row += 1) {
       for (let col = visibleCols.start; col <= visibleCols.end; col += 1) {
-        const value = displayRef.current.get(getCellKey(row, col))
+        const key = getCellKey(row, col)
+        const value = displayRef.current.get(key)
         if (!value) continue
 
-        const textX = col * GRID_CONFIG.cellWidth + offsetX + TEXT_STYLES.paddingX
+        const format = formatsRef.current.get(key)
+        const font = getCellFont(format)
+        const align = getCellAlign(format)
+        if (font !== lastFont) {
+          ctx.font = font
+          lastFont = font
+        }
+        if (align !== lastAlign) {
+          ctx.textAlign = align
+          lastAlign = align
+        }
+
+        const cellLeft = col * GRID_CONFIG.cellWidth + offsetX
         const textY = row * GRID_CONFIG.cellHeight + offsetY + GRID_CONFIG.cellHeight / 2
+        const textX =
+          align === 'center'
+            ? cellLeft + GRID_CONFIG.cellWidth / 2
+            : align === 'right'
+              ? cellLeft + GRID_CONFIG.cellWidth - TEXT_STYLES.paddingX
+              : cellLeft + TEXT_STYLES.paddingX
         ctx.fillText(value, textX, textY, GRID_CONFIG.cellWidth - TEXT_STYLES.paddingX * 2)
       }
     }
@@ -225,6 +282,11 @@ const CanvasGrid = forwardRef<CanvasGridHandle>(function CanvasGrid(_, ref) {
   }, [cells, scheduleDraw])
 
   useEffect(() => {
+    formatsRef.current = formats
+    scheduleDraw()
+  }, [formats, scheduleDraw])
+
+  useEffect(() => {
     let isActive = true
     loadWorkbook()
       .then((loaded) => {
@@ -270,6 +332,7 @@ const CanvasGrid = forwardRef<CanvasGridHandle>(function CanvasGrid(_, ref) {
 
   const resetWorkbook = useCallback(() => {
     setCells(new Map())
+    setFormats(new Map())
     setUndoStack([])
     setRedoStack([])
     setSelection({ row: 0, col: 0 })
@@ -295,6 +358,7 @@ const CanvasGrid = forwardRef<CanvasGridHandle>(function CanvasGrid(_, ref) {
     const text = await file.text()
     const nextCells = csvToCells(text, GRID_CONFIG.rows, GRID_CONFIG.cols)
     setCells(nextCells)
+    setFormats(new Map())
     setUndoStack([])
     setRedoStack([])
     setSelection({ row: 0, col: 0 })
@@ -308,6 +372,54 @@ const CanvasGrid = forwardRef<CanvasGridHandle>(function CanvasGrid(_, ref) {
       resetWorkbook,
       exportCsv,
       importCsvFile,
+      toggleBold: () => {
+        const key = getCellKey(selectionRef.current.row, selectionRef.current.col)
+        setFormats((prev) => {
+          const next = new Map(prev)
+          const updated = normalizeFormat({
+            ...next.get(key),
+            bold: !next.get(key)?.bold,
+          })
+          if (updated) {
+            next.set(key, updated)
+          } else {
+            next.delete(key)
+          }
+          return next
+        })
+      },
+      toggleItalic: () => {
+        const key = getCellKey(selectionRef.current.row, selectionRef.current.col)
+        setFormats((prev) => {
+          const next = new Map(prev)
+          const updated = normalizeFormat({
+            ...next.get(key),
+            italic: !next.get(key)?.italic,
+          })
+          if (updated) {
+            next.set(key, updated)
+          } else {
+            next.delete(key)
+          }
+          return next
+        })
+      },
+      setAlignment: (align) => {
+        const key = getCellKey(selectionRef.current.row, selectionRef.current.col)
+        setFormats((prev) => {
+          const next = new Map(prev)
+          const updated = normalizeFormat({
+            ...next.get(key),
+            align,
+          })
+          if (updated) {
+            next.set(key, updated)
+          } else {
+            next.delete(key)
+          }
+          return next
+        })
+      },
     }),
     [exportCsv, importCsvFile, resetWorkbook],
   )
@@ -345,6 +457,62 @@ const CanvasGrid = forwardRef<CanvasGridHandle>(function CanvasGrid(_, ref) {
     setDraftValue('')
     scheduleDraw()
   }, [scheduleDraw])
+
+  const pasteText = useCallback(
+    (text: string) => {
+      const rows = parseDelimitedText(text)
+      if (rows.length === 0) return
+
+      const start = selectionRef.current
+      const historyEntries: HistoryEntry[] = []
+
+      setCells((prev) => {
+        const next = new Map(prev)
+        for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
+          const row = start.row + rowIndex
+          if (row >= GRID_CONFIG.rows) break
+          const values = rows[rowIndex]
+          for (let colIndex = 0; colIndex < values.length; colIndex += 1) {
+            const col = start.col + colIndex
+            if (col >= GRID_CONFIG.cols) break
+            const key = getCellKey(row, col)
+            const prevValue = next.get(key) ?? null
+            const nextValue = values[colIndex] === '' ? null : values[colIndex]
+            if (prevValue === nextValue) continue
+            if (nextValue === null) {
+              next.delete(key)
+            } else {
+              next.set(key, nextValue)
+            }
+            historyEntries.push({ key, prev: prevValue, next: nextValue })
+          }
+        }
+        return next
+      })
+
+      if (historyEntries.length > 0) {
+        setUndoStack((prev) => [...prev, ...historyEntries])
+        setRedoStack([])
+      }
+    },
+    [setCells],
+  )
+
+  const handleCopy = (event: ClipboardEvent<HTMLDivElement>) => {
+    if (editingCell) return
+    const key = getCellKey(selectionRef.current.row, selectionRef.current.col)
+    const value = cellsRef.current.get(key) ?? ''
+    event.preventDefault()
+    event.clipboardData.setData('text/plain', value)
+  }
+
+  const handlePaste = (event: ClipboardEvent<HTMLDivElement>) => {
+    if (editingCell) return
+    const text = event.clipboardData.getData('text/plain')
+    if (text === '') return
+    event.preventDefault()
+    pasteText(text)
+  }
 
   const applyHistoryEntry = useCallback((entry: HistoryEntry, value: string | null) => {
     setCells((prev) => {
@@ -478,6 +646,7 @@ const CanvasGrid = forwardRef<CanvasGridHandle>(function CanvasGrid(_, ref) {
   const totalHeight = GRID_CONFIG.rows * GRID_CONFIG.cellHeight
   const selectedKey = getCellKey(selection.row, selection.col)
   const selectedDisplay = displayRef.current.get(selectedKey) ?? ''
+  const selectedFormat = formats.get(selectedKey)
 
   return (
     <div className="grid-shell">
@@ -487,6 +656,8 @@ const CanvasGrid = forwardRef<CanvasGridHandle>(function CanvasGrid(_, ref) {
         onPointerDown={handlePointerDown}
         onDoubleClick={handleDoubleClick}
         onKeyDown={handleKeyDown}
+        onCopy={handleCopy}
+        onPaste={handlePaste}
         tabIndex={0}
         role="presentation"
       >
@@ -514,6 +685,9 @@ const CanvasGrid = forwardRef<CanvasGridHandle>(function CanvasGrid(_, ref) {
             height: GRID_CONFIG.cellHeight,
             left: editingCell.col * GRID_CONFIG.cellWidth - scrollState.left,
             top: editingCell.row * GRID_CONFIG.cellHeight - scrollState.top,
+            fontWeight: selectedFormat?.bold ? 600 : 400,
+            fontStyle: selectedFormat?.italic ? 'italic' : 'normal',
+            textAlign: selectedFormat?.align ?? 'left',
           }}
         />
       ) : null}

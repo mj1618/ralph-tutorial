@@ -17,6 +17,51 @@ function App() {
           <button
             className="toolbar__button"
             type="button"
+            onClick={() => gridRef.current?.toggleBold()}
+            aria-label="Toggle bold"
+            title="Bold"
+          >
+            Bold
+          </button>
+          <button
+            className="toolbar__button"
+            type="button"
+            onClick={() => gridRef.current?.toggleItalic()}
+            aria-label="Toggle italic"
+            title="Italic"
+          >
+            Italic
+          </button>
+          <button
+            className="toolbar__button"
+            type="button"
+            onClick={() => gridRef.current?.setAlignment('left')}
+            aria-label="Align left"
+            title="Align left"
+          >
+            Left
+          </button>
+          <button
+            className="toolbar__button"
+            type="button"
+            onClick={() => gridRef.current?.setAlignment('center')}
+            aria-label="Align center"
+            title="Align center"
+          >
+            Center
+          </button>
+          <button
+            className="toolbar__button"
+            type="button"
+            onClick={() => gridRef.current?.setAlignment('right')}
+            aria-label="Align right"
+            title="Align right"
+          >
+            Right
+          </button>
+          <button
+            className="toolbar__button"
+            type="button"
             onClick={() => gridRef.current?.resetWorkbook()}
           >
             New
