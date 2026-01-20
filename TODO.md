@@ -86,7 +86,7 @@ Build a fast, Excel-like spreadsheet app that runs entirely in the browser (with
 - [x] **Scaffold app**: Vite + React + TS; basic layout with toolbar + grid viewport.
 - [x] **Build grid renderer**: virtualization/canvas draw loop + selection highlighting.
 - [x] **Cell edit overlay**: controlled input positioned over selected cell; commit/cancel logic.
-- **Data model & undo/redo**: sparse cell store + action stack.
+- [x] **Data model & undo/redo**: sparse cell store + action stack.
 - **Formula engine v0**: parse + eval + dependency graph + recalc.
 - **Persistence**: IndexedDB save/load + export/import CSV.
 - **Smoke tests**: Vitest for formulas; Playwright for core edit/navigate/copy-paste.

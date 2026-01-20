@@ -12,6 +12,12 @@ type GridSelection = {
   col: number
 }
 
+type HistoryEntry = {
+  key: string
+  prev: string | null
+  next: string | null
+}
+
 const GRID_CONFIG = {
   rows: 1000,
   cols: 200,
@@ -56,7 +62,10 @@ export default function CanvasGrid() {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const editorRef = useRef<HTMLInputElement | null>(null)
   const selectionRef = useRef<GridSelection>({ row: 0, col: 0 })
-  const cellValuesRef = useRef<Map<string, string>>(new Map())
+  const [cells, setCells] = useState<Map<string, string>>(() => new Map())
+  const cellsRef = useRef<Map<string, string>>(new Map())
+  const [, setUndoStack] = useState<HistoryEntry[]>([])
+  const [, setRedoStack] = useState<HistoryEntry[]>([])
   const frameRef = useRef<number | null>(null)
   const [selection, setSelection] = useState<GridSelection>({ row: 0, col: 0 })
   const [editingCell, setEditingCell] = useState<GridSelection | null>(null)
@@ -150,7 +159,7 @@ export default function CanvasGrid() {
 
     for (let row = visibleRows.start; row <= visibleRows.end; row += 1) {
       for (let col = visibleCols.start; col <= visibleCols.end; col += 1) {
-        const value = cellValuesRef.current.get(getCellKey(row, col))
+        const value = cellsRef.current.get(getCellKey(row, col))
         if (!value) continue
 
         const textX = col * GRID_CONFIG.cellWidth + offsetX + TEXT_STYLES.paddingX
@@ -199,13 +208,18 @@ export default function CanvasGrid() {
   }, [selection, scheduleDraw])
 
   useEffect(() => {
+    cellsRef.current = cells
+    scheduleDraw()
+  }, [cells, scheduleDraw])
+
+  useEffect(() => {
     if (!editingCell) return
     const handle = window.requestAnimationFrame(() => editorRef.current?.focus())
     return () => window.cancelAnimationFrame(handle)
   }, [editingCell])
 
   const beginEdit = useCallback((cell: GridSelection) => {
-    const currentValue = cellValuesRef.current.get(getCellKey(cell.row, cell.col)) ?? ''
+    const currentValue = cellsRef.current.get(getCellKey(cell.row, cell.col)) ?? ''
     setEditingCell(cell)
     setDraftValue(currentValue)
   }, [])
@@ -213,10 +227,20 @@ export default function CanvasGrid() {
   const commitEdit = useCallback(() => {
     if (!editingCell) return
     const key = getCellKey(editingCell.row, editingCell.col)
-    if (draftValue === '') {
-      cellValuesRef.current.delete(key)
-    } else {
-      cellValuesRef.current.set(key, draftValue)
+    const prevValue = cellsRef.current.get(key) ?? null
+    const nextValue = draftValue === '' ? null : draftValue
+    if (prevValue !== nextValue) {
+      setCells((prev) => {
+        const next = new Map(prev)
+        if (nextValue === null) {
+          next.delete(key)
+        } else {
+          next.set(key, nextValue)
+        }
+        return next
+      })
+      setUndoStack((prev) => [...prev, { key, prev: prevValue, next: nextValue }])
+      setRedoStack([])
     }
     setEditingCell(null)
     scheduleDraw()
@@ -227,6 +251,38 @@ export default function CanvasGrid() {
     setDraftValue('')
     scheduleDraw()
   }, [scheduleDraw])
+
+  const applyHistoryEntry = useCallback((entry: HistoryEntry, value: string | null) => {
+    setCells((prev) => {
+      const next = new Map(prev)
+      if (value === null) {
+        next.delete(entry.key)
+      } else {
+        next.set(entry.key, value)
+      }
+      return next
+    })
+  }, [])
+
+  const undoLast = useCallback(() => {
+    setUndoStack((prev) => {
+      if (prev.length === 0) return prev
+      const entry = prev[prev.length - 1]
+      applyHistoryEntry(entry, entry.prev)
+      setRedoStack((redoPrev) => [...redoPrev, entry])
+      return prev.slice(0, -1)
+    })
+  }, [applyHistoryEntry])
+
+  const redoLast = useCallback(() => {
+    setRedoStack((prev) => {
+      if (prev.length === 0) return prev
+      const entry = prev[prev.length - 1]
+      applyHistoryEntry(entry, entry.next)
+      setUndoStack((undoPrev) => [...undoPrev, entry])
+      return prev.slice(0, -1)
+    })
+  }, [applyHistoryEntry])
 
   const handlePointerDown = (event: PointerEvent<HTMLDivElement>) => {
     const container = containerRef.current
@@ -263,6 +319,22 @@ export default function CanvasGrid() {
   }
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const isMeta = event.metaKey || event.ctrlKey
+    const key = event.key.toLowerCase()
+    if (isMeta && key === 'z' && !editingCell) {
+      event.preventDefault()
+      if (event.shiftKey) {
+        redoLast()
+      } else {
+        undoLast()
+      }
+      return
+    }
+    if (isMeta && key === 'y' && !editingCell) {
+      event.preventDefault()
+      redoLast()
+      return
+    }
     if (event.key === 'Enter') {
       event.preventDefault()
       if (editingCell) {
