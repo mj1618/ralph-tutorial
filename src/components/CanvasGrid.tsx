@@ -25,6 +25,8 @@ type HistoryEntry = {
   next: string | null
 }
 
+type HistoryBatch = HistoryEntry[]
+
 type CellFormat = {
   bold?: boolean
   italic?: boolean
@@ -108,8 +110,8 @@ const CanvasGrid = forwardRef<CanvasGridHandle>(function CanvasGrid(_, ref) {
   const displayRef = useRef<Map<string, string>>(new Map())
   const [formats, setFormats] = useState<Map<string, CellFormat>>(() => new Map())
   const formatsRef = useRef<Map<string, CellFormat>>(new Map())
-  const [, setUndoStack] = useState<HistoryEntry[]>([])
-  const [, setRedoStack] = useState<HistoryEntry[]>([])
+  const [, setUndoStack] = useState<HistoryBatch[]>([])
+  const [, setRedoStack] = useState<HistoryBatch[]>([])
   const frameRef = useRef<number | null>(null)
   const hasLoadedRef = useRef(false)
   const saveTimeoutRef = useRef<number | null>(null)
@@ -445,7 +447,7 @@ const CanvasGrid = forwardRef<CanvasGridHandle>(function CanvasGrid(_, ref) {
         }
         return next
       })
-      setUndoStack((prev) => [...prev, { key, prev: prevValue, next: nextValue }])
+      setUndoStack((prev) => [...prev, [{ key, prev: prevValue, next: nextValue }]])
       setRedoStack([])
     }
     setEditingCell(null)
@@ -491,7 +493,7 @@ const CanvasGrid = forwardRef<CanvasGridHandle>(function CanvasGrid(_, ref) {
       })
 
       if (historyEntries.length > 0) {
-        setUndoStack((prev) => [...prev, ...historyEntries])
+        setUndoStack((prev) => [...prev, historyEntries])
         setRedoStack([])
       }
     },
@@ -514,13 +516,16 @@ const CanvasGrid = forwardRef<CanvasGridHandle>(function CanvasGrid(_, ref) {
     pasteText(text)
   }
 
-  const applyHistoryEntry = useCallback((entry: HistoryEntry, value: string | null) => {
+  const applyHistoryBatch = useCallback((batch: HistoryBatch, mode: 'prev' | 'next') => {
     setCells((prev) => {
       const next = new Map(prev)
-      if (value === null) {
-        next.delete(entry.key)
-      } else {
-        next.set(entry.key, value)
+      for (const entry of batch) {
+        const value = entry[mode]
+        if (value === null) {
+          next.delete(entry.key)
+        } else {
+          next.set(entry.key, value)
+        }
       }
       return next
     })
@@ -529,22 +534,22 @@ const CanvasGrid = forwardRef<CanvasGridHandle>(function CanvasGrid(_, ref) {
   const undoLast = useCallback(() => {
     setUndoStack((prev) => {
       if (prev.length === 0) return prev
-      const entry = prev[prev.length - 1]
-      applyHistoryEntry(entry, entry.prev)
-      setRedoStack((redoPrev) => [...redoPrev, entry])
+      const batch = prev[prev.length - 1]
+      applyHistoryBatch(batch, 'prev')
+      setRedoStack((redoPrev) => [...redoPrev, batch])
       return prev.slice(0, -1)
     })
-  }, [applyHistoryEntry])
+  }, [applyHistoryBatch])
 
   const redoLast = useCallback(() => {
     setRedoStack((prev) => {
       if (prev.length === 0) return prev
-      const entry = prev[prev.length - 1]
-      applyHistoryEntry(entry, entry.next)
-      setUndoStack((undoPrev) => [...undoPrev, entry])
+      const batch = prev[prev.length - 1]
+      applyHistoryBatch(batch, 'next')
+      setUndoStack((undoPrev) => [...undoPrev, batch])
       return prev.slice(0, -1)
     })
-  }, [applyHistoryEntry])
+  }, [applyHistoryBatch])
 
   const handlePointerDown = (event: PointerEvent<HTMLDivElement>) => {
     const container = containerRef.current

@@ -25,7 +25,7 @@ Build a fast, Excel-like spreadsheet app that runs entirely in the browser (with
   - Edit cell values (double-click / enter) with an input overlay
   - [x] Keyboard navigation now supports arrows + tab
 - [x] Copy/paste values with system clipboard (TSV/CSV in/out)
-  - Undo/redo (command stack)
+  - [x] Undo/redo (command stack)
 - **Data model**
   - Workbook → sheet(s) → cells (sparse map)
   - Row/column sizing defaults; basic resizing later
