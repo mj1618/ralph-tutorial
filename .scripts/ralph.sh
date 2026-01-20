@@ -12,7 +12,7 @@ trap cleanup SIGINT
 
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." &>/dev/null && pwd)"
 
-for i in $(seq 1 30); do
+for i in $(seq 1 10000); do
   # Run agent and pretty-print each line to stdout via node parser
   # NOTE: With `set -euo pipefail`, a failure in either `agent` or `node -e` would
   # abort the entire script. We want to continue the loop instead.
