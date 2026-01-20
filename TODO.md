@@ -40,7 +40,7 @@ Build a fast, Excel-like spreadsheet app that runs entirely in the browser (with
   - Save/load workbook to IndexedDB automatically
   - Export/import as CSV (single sheet)
 - **Tests (keep it light but real)**
-  - Unit tests for formula parser/evaluator and dependency graph
+  - [x] Unit tests for formula parser/evaluator and dependency graph
   - A small set of Playwright tests:
     - Edit cell, navigate, undo/redo
     - Simple formula recalc when precedent changes

@@ -33,4 +33,21 @@ describe('calculateDisplayCells', () => {
     expect(display.get(getCellKey(1, 1))).toBe('6.666666666666667')
     expect(display.get(getCellKey(2, 1))).toBe('3')
   })
+
+  it('recalculates dependent formulas and flags cycles', () => {
+    const cells = new Map<string, string>([
+      [getCellKey(0, 0), '1'],
+      [getCellKey(0, 1), '=A1+1'],
+      [getCellKey(0, 2), '=B1+1'],
+      [getCellKey(1, 0), '=B2'],
+      [getCellKey(1, 1), '=A2'],
+    ])
+
+    const display = calculateDisplayCells(cells)
+
+    expect(display.get(getCellKey(0, 1))).toBe('2')
+    expect(display.get(getCellKey(0, 2))).toBe('3')
+    expect(display.get(getCellKey(1, 0))).toBe('#CYCLE')
+    expect(display.get(getCellKey(1, 1))).toBe('#CYCLE')
+  })
 })
