@@ -10,6 +10,7 @@ import {
 } from 'react'
 import { getCellKey } from '../utils/cellKey'
 import { cellsToCsv, csvToCells } from '../utils/csv'
+import { calculateDisplayCells } from '../utils/formulas'
 import { clearWorkbook, loadWorkbook, saveWorkbook } from '../utils/persistence'
 
 type GridSelection = {
@@ -71,6 +72,7 @@ const CanvasGrid = forwardRef<CanvasGridHandle>(function CanvasGrid(_, ref) {
   const selectionRef = useRef<GridSelection>({ row: 0, col: 0 })
   const [cells, setCells] = useState<Map<string, string>>(() => new Map())
   const cellsRef = useRef<Map<string, string>>(new Map())
+  const displayRef = useRef<Map<string, string>>(new Map())
   const [, setUndoStack] = useState<HistoryEntry[]>([])
   const [, setRedoStack] = useState<HistoryEntry[]>([])
   const frameRef = useRef<number | null>(null)
@@ -168,7 +170,7 @@ const CanvasGrid = forwardRef<CanvasGridHandle>(function CanvasGrid(_, ref) {
 
     for (let row = visibleRows.start; row <= visibleRows.end; row += 1) {
       for (let col = visibleCols.start; col <= visibleCols.end; col += 1) {
-        const value = cellsRef.current.get(getCellKey(row, col))
+        const value = displayRef.current.get(getCellKey(row, col))
         if (!value) continue
 
         const textX = col * GRID_CONFIG.cellWidth + offsetX + TEXT_STYLES.paddingX
@@ -218,6 +220,7 @@ const CanvasGrid = forwardRef<CanvasGridHandle>(function CanvasGrid(_, ref) {
 
   useEffect(() => {
     cellsRef.current = cells
+    displayRef.current = calculateDisplayCells(cells)
     scheduleDraw()
   }, [cells, scheduleDraw])
 
