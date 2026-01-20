@@ -50,7 +50,7 @@ Build a fast, Excel-like spreadsheet app that runs entirely in the browser (with
 
 ### Phase 2 — UX polish + richer spreadsheet features
 - **Selection & fill**
-  - Multi-cell selection (shift+arrows, mouse drag)
+  - [x] Multi-cell selection (shift+arrows, mouse drag)
   - Autofill handle (drag down/right), fill series (1,2,3…)
 - **Rows/columns**
   - Insert/delete rows/columns

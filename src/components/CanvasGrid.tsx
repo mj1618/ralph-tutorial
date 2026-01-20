@@ -14,9 +14,16 @@ import { cellsToCsv, csvToCells, parseDelimitedText } from '../utils/csv'
 import { calculateDisplayCells } from '../utils/formulas'
 import { clearWorkbook, loadWorkbook, saveWorkbook } from '../utils/persistence'
 
-type GridSelection = {
+type GridCell = {
   row: number
   col: number
+}
+
+type GridSelection = {
+  anchorRow: number
+  anchorCol: number
+  focusRow: number
+  focusCol: number
 }
 
 type HistoryEntry = {
@@ -56,6 +63,14 @@ const TEXT_STYLES = {
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max)
+}
+
+function getSelectionBounds(selection: GridSelection) {
+  const startRow = Math.min(selection.anchorRow, selection.focusRow)
+  const endRow = Math.max(selection.anchorRow, selection.focusRow)
+  const startCol = Math.min(selection.anchorCol, selection.focusCol)
+  const endCol = Math.max(selection.anchorCol, selection.focusCol)
+  return { startRow, endRow, startCol, endCol }
 }
 
 function getVisibleRange(
@@ -104,7 +119,16 @@ const CanvasGrid = forwardRef<CanvasGridHandle>(function CanvasGrid(_, ref) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const containerRef = useRef<HTMLDivElement | null>(null)
   const editorRef = useRef<HTMLInputElement | null>(null)
-  const selectionRef = useRef<GridSelection>({ row: 0, col: 0 })
+  const selectionRef = useRef<GridSelection>({
+    anchorRow: 0,
+    anchorCol: 0,
+    focusRow: 0,
+    focusCol: 0,
+  })
+  const dragStateRef = useRef<{ active: boolean; pointerId: number | null }>({
+    active: false,
+    pointerId: null,
+  })
   const [cells, setCells] = useState<Map<string, string>>(() => new Map())
   const cellsRef = useRef<Map<string, string>>(new Map())
   const displayRef = useRef<Map<string, string>>(new Map())
@@ -115,8 +139,13 @@ const CanvasGrid = forwardRef<CanvasGridHandle>(function CanvasGrid(_, ref) {
   const frameRef = useRef<number | null>(null)
   const hasLoadedRef = useRef(false)
   const saveTimeoutRef = useRef<number | null>(null)
-  const [selection, setSelection] = useState<GridSelection>({ row: 0, col: 0 })
-  const [editingCell, setEditingCell] = useState<GridSelection | null>(null)
+  const [selection, setSelection] = useState<GridSelection>({
+    anchorRow: 0,
+    anchorCol: 0,
+    focusRow: 0,
+    focusCol: 0,
+  })
+  const [editingCell, setEditingCell] = useState<GridCell | null>(null)
   const [draftValue, setDraftValue] = useState('')
   const [scrollState, setScrollState] = useState({ left: 0, top: 0 })
 
@@ -183,22 +212,25 @@ const CanvasGrid = forwardRef<CanvasGridHandle>(function CanvasGrid(_, ref) {
     ctx.stroke()
 
     const activeSelection = selectionRef.current
-    if (activeSelection) {
-      const selX = activeSelection.col * GRID_CONFIG.cellWidth + offsetX
-      const selY = activeSelection.row * GRID_CONFIG.cellHeight + offsetY
+    const { startRow, endRow, startCol, endCol } = getSelectionBounds(activeSelection)
+    const selectionLeft = startCol * GRID_CONFIG.cellWidth + offsetX
+    const selectionTop = startRow * GRID_CONFIG.cellHeight + offsetY
+    const selectionWidth = (endCol - startCol + 1) * GRID_CONFIG.cellWidth
+    const selectionHeight = (endRow - startRow + 1) * GRID_CONFIG.cellHeight
+    const selectionRight = selectionLeft + selectionWidth
+    const selectionBottom = selectionTop + selectionHeight
 
-      if (
-        selX + GRID_CONFIG.cellWidth >= 0 &&
-        selY + GRID_CONFIG.cellHeight >= 0 &&
-        selX <= targetWidth &&
-        selY <= targetHeight
-      ) {
-        ctx.fillStyle = GRID_STYLES.selectionFill
-        ctx.fillRect(selX, selY, GRID_CONFIG.cellWidth, GRID_CONFIG.cellHeight)
-        ctx.strokeStyle = GRID_STYLES.selectionBorder
-        ctx.lineWidth = 2
-        ctx.strokeRect(selX, selY, GRID_CONFIG.cellWidth, GRID_CONFIG.cellHeight)
-      }
+    if (
+      selectionRight >= 0 &&
+      selectionBottom >= 0 &&
+      selectionLeft <= targetWidth &&
+      selectionTop <= targetHeight
+    ) {
+      ctx.fillStyle = GRID_STYLES.selectionFill
+      ctx.fillRect(selectionLeft, selectionTop, selectionWidth, selectionHeight)
+      ctx.strokeStyle = GRID_STYLES.selectionBorder
+      ctx.lineWidth = 2
+      ctx.strokeRect(selectionLeft, selectionTop, selectionWidth, selectionHeight)
     }
 
     ctx.font = getCellFont(undefined)
@@ -337,7 +369,7 @@ const CanvasGrid = forwardRef<CanvasGridHandle>(function CanvasGrid(_, ref) {
     setFormats(new Map())
     setUndoStack([])
     setRedoStack([])
-    setSelection({ row: 0, col: 0 })
+    setSelection({ anchorRow: 0, anchorCol: 0, focusRow: 0, focusCol: 0 })
     setEditingCell(null)
     setDraftValue('')
     clearWorkbook().catch(() => {})
@@ -363,7 +395,7 @@ const CanvasGrid = forwardRef<CanvasGridHandle>(function CanvasGrid(_, ref) {
     setFormats(new Map())
     setUndoStack([])
     setRedoStack([])
-    setSelection({ row: 0, col: 0 })
+    setSelection({ anchorRow: 0, anchorCol: 0, focusRow: 0, focusCol: 0 })
     setEditingCell(null)
     setDraftValue('')
   }, [])
@@ -375,7 +407,8 @@ const CanvasGrid = forwardRef<CanvasGridHandle>(function CanvasGrid(_, ref) {
       exportCsv,
       importCsvFile,
       toggleBold: () => {
-        const key = getCellKey(selectionRef.current.row, selectionRef.current.col)
+        const { focusRow, focusCol } = selectionRef.current
+        const key = getCellKey(focusRow, focusCol)
         setFormats((prev) => {
           const next = new Map(prev)
           const updated = normalizeFormat({
@@ -391,7 +424,8 @@ const CanvasGrid = forwardRef<CanvasGridHandle>(function CanvasGrid(_, ref) {
         })
       },
       toggleItalic: () => {
-        const key = getCellKey(selectionRef.current.row, selectionRef.current.col)
+        const { focusRow, focusCol } = selectionRef.current
+        const key = getCellKey(focusRow, focusCol)
         setFormats((prev) => {
           const next = new Map(prev)
           const updated = normalizeFormat({
@@ -407,7 +441,8 @@ const CanvasGrid = forwardRef<CanvasGridHandle>(function CanvasGrid(_, ref) {
         })
       },
       setAlignment: (align) => {
-        const key = getCellKey(selectionRef.current.row, selectionRef.current.col)
+        const { focusRow, focusCol } = selectionRef.current
+        const key = getCellKey(focusRow, focusCol)
         setFormats((prev) => {
           const next = new Map(prev)
           const updated = normalizeFormat({
@@ -426,7 +461,7 @@ const CanvasGrid = forwardRef<CanvasGridHandle>(function CanvasGrid(_, ref) {
     [exportCsv, importCsvFile, resetWorkbook],
   )
 
-  const beginEdit = useCallback((cell: GridSelection) => {
+  const beginEdit = useCallback((cell: GridCell) => {
     const currentValue = cellsRef.current.get(getCellKey(cell.row, cell.col)) ?? ''
     setEditingCell(cell)
     setDraftValue(currentValue)
@@ -471,11 +506,11 @@ const CanvasGrid = forwardRef<CanvasGridHandle>(function CanvasGrid(_, ref) {
       setCells((prev) => {
         const next = new Map(prev)
         for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
-          const row = start.row + rowIndex
+          const row = start.focusRow + rowIndex
           if (row >= GRID_CONFIG.rows) break
           const values = rows[rowIndex]
           for (let colIndex = 0; colIndex < values.length; colIndex += 1) {
-            const col = start.col + colIndex
+            const col = start.focusCol + colIndex
             if (col >= GRID_CONFIG.cols) break
             const key = getCellKey(row, col)
             const prevValue = next.get(key) ?? null
@@ -502,8 +537,24 @@ const CanvasGrid = forwardRef<CanvasGridHandle>(function CanvasGrid(_, ref) {
 
   const handleCopy = (event: ClipboardEvent<HTMLDivElement>) => {
     if (editingCell) return
-    const key = getCellKey(selectionRef.current.row, selectionRef.current.col)
-    const value = cellsRef.current.get(key) ?? ''
+    const { startRow, endRow, startCol, endCol } = getSelectionBounds(selectionRef.current)
+    const isSingleCell = startRow === endRow && startCol === endCol
+    let value = ''
+    if (isSingleCell) {
+      const key = getCellKey(startRow, startCol)
+      value = cellsRef.current.get(key) ?? ''
+    } else {
+      const rows: string[] = []
+      for (let row = startRow; row <= endRow; row += 1) {
+        const values: string[] = []
+        for (let col = startCol; col <= endCol; col += 1) {
+          const key = getCellKey(row, col)
+          values.push(cellsRef.current.get(key) ?? '')
+        }
+        rows.push(values.join('\t'))
+      }
+      value = rows.join('\n')
+    }
     event.preventDefault()
     event.clipboardData.setData('text/plain', value)
   }
@@ -566,8 +617,47 @@ const CanvasGrid = forwardRef<CanvasGridHandle>(function CanvasGrid(_, ref) {
       commitEdit()
     }
 
-    setSelection({ row, col })
+    if (event.shiftKey) {
+      setSelection((prev) => ({
+        anchorRow: prev.anchorRow,
+        anchorCol: prev.anchorCol,
+        focusRow: row,
+        focusCol: col,
+      }))
+    } else {
+      setSelection({ anchorRow: row, anchorCol: col, focusRow: row, focusCol: col })
+    }
+    dragStateRef.current = { active: true, pointerId: event.pointerId }
+    container.setPointerCapture(event.pointerId)
     container.focus()
+  }
+
+  const handlePointerMove = (event: PointerEvent<HTMLDivElement>) => {
+    const container = containerRef.current
+    if (!container || !dragStateRef.current.active) return
+    if (dragStateRef.current.pointerId !== event.pointerId) return
+
+    const rect = container.getBoundingClientRect()
+    const x = event.clientX - rect.left + container.scrollLeft
+    const y = event.clientY - rect.top + container.scrollTop
+
+    const col = clamp(Math.floor(x / GRID_CONFIG.cellWidth), 0, GRID_CONFIG.cols - 1)
+    const row = clamp(Math.floor(y / GRID_CONFIG.cellHeight), 0, GRID_CONFIG.rows - 1)
+
+    setSelection((prev) => ({
+      anchorRow: prev.anchorRow,
+      anchorCol: prev.anchorCol,
+      focusRow: row,
+      focusCol: col,
+    }))
+  }
+
+  const handlePointerUp = (event: PointerEvent<HTMLDivElement>) => {
+    const container = containerRef.current
+    if (!container || !dragStateRef.current.active) return
+    if (dragStateRef.current.pointerId !== event.pointerId) return
+    dragStateRef.current = { active: false, pointerId: null }
+    container.releasePointerCapture(event.pointerId)
   }
 
   const handleDoubleClick = (event: PointerEvent<HTMLDivElement>) => {
@@ -581,7 +671,7 @@ const CanvasGrid = forwardRef<CanvasGridHandle>(function CanvasGrid(_, ref) {
     const col = clamp(Math.floor(x / GRID_CONFIG.cellWidth), 0, GRID_CONFIG.cols - 1)
     const row = clamp(Math.floor(y / GRID_CONFIG.cellHeight), 0, GRID_CONFIG.rows - 1)
 
-    setSelection({ row, col })
+    setSelection({ anchorRow: row, anchorCol: col, focusRow: row, focusCol: col })
     beginEdit({ row, col })
   }
 
@@ -607,36 +697,46 @@ const CanvasGrid = forwardRef<CanvasGridHandle>(function CanvasGrid(_, ref) {
       if (editingCell) {
         commitEdit()
       } else {
-        beginEdit(selection)
+        beginEdit({ row: selection.focusRow, col: selection.focusCol })
       }
     }
     if (!editingCell) {
-      const move = (rowDelta: number, colDelta: number) => {
-        const nextRow = clamp(selection.row + rowDelta, 0, GRID_CONFIG.rows - 1)
-        const nextCol = clamp(selection.col + colDelta, 0, GRID_CONFIG.cols - 1)
-        setSelection({ row: nextRow, col: nextCol })
+      const move = (rowDelta: number, colDelta: number, extend: boolean) => {
+        const current = selectionRef.current
+        const nextRow = clamp(current.focusRow + rowDelta, 0, GRID_CONFIG.rows - 1)
+        const nextCol = clamp(current.focusCol + colDelta, 0, GRID_CONFIG.cols - 1)
+        if (extend) {
+          setSelection((prev) => ({
+            anchorRow: prev.anchorRow,
+            anchorCol: prev.anchorCol,
+            focusRow: nextRow,
+            focusCol: nextCol,
+          }))
+        } else {
+          setSelection({ anchorRow: nextRow, anchorCol: nextCol, focusRow: nextRow, focusCol: nextCol })
+        }
       }
       switch (event.key) {
         case 'ArrowUp':
           event.preventDefault()
-          move(-1, 0)
+          move(-1, 0, event.shiftKey)
           return
         case 'ArrowDown':
           event.preventDefault()
-          move(1, 0)
+          move(1, 0, event.shiftKey)
           return
         case 'ArrowLeft':
           event.preventDefault()
-          move(0, -1)
+          move(0, -1, event.shiftKey)
           return
         case 'ArrowRight':
           event.preventDefault()
-          move(0, 1)
+          move(0, 1, event.shiftKey)
           return
         case 'Tab': {
           event.preventDefault()
           const direction = event.shiftKey ? -1 : 1
-          move(0, direction)
+          move(0, direction, false)
           return
         }
       }
@@ -649,7 +749,7 @@ const CanvasGrid = forwardRef<CanvasGridHandle>(function CanvasGrid(_, ref) {
 
   const totalWidth = GRID_CONFIG.cols * GRID_CONFIG.cellWidth
   const totalHeight = GRID_CONFIG.rows * GRID_CONFIG.cellHeight
-  const selectedKey = getCellKey(selection.row, selection.col)
+  const selectedKey = getCellKey(selection.focusRow, selection.focusCol)
   const selectedDisplay = displayRef.current.get(selectedKey) ?? ''
   const selectedFormat = formats.get(selectedKey)
 
@@ -659,6 +759,8 @@ const CanvasGrid = forwardRef<CanvasGridHandle>(function CanvasGrid(_, ref) {
         className="grid-scroll-container"
         ref={containerRef}
         onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
         onDoubleClick={handleDoubleClick}
         onKeyDown={handleKeyDown}
         onCopy={handleCopy}
