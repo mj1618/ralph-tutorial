@@ -58,7 +58,7 @@ Build a fast, Excel-like spreadsheet app that runs entirely in the browser (with
   - More formats: currency, percent, date
   - Conditional formatting (basic rules)
 - **Import/export**
-  - Better CSV import (delimiter detection, quoting)
+  - [x] Better CSV import (delimiter detection, quoting)
   - Export to XLSX (optional; could be Phase 3 if complex)
 - **Tests**
   - Add a couple more Playwright flows (multi-selection, insert row shifts refs)

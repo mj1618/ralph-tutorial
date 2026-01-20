@@ -42,6 +42,64 @@ type CsvParseState = {
   inQuotes: boolean
 }
 
+const DELIMITER_CANDIDATES = [',', '\t', ';', '|'] as const
+
+function pickDelimiter(counts: Map<string, number>) {
+  let best: string | null = null
+  let bestCount = 0
+  for (const delimiter of DELIMITER_CANDIDATES) {
+    const count = counts.get(delimiter) ?? 0
+    if (count > bestCount) {
+      best = delimiter
+      bestCount = count
+    }
+  }
+  return bestCount > 0 ? best : null
+}
+
+function detectDelimiter(text: string) {
+  let inQuotes = false
+  let lineCount = 0
+  let counts = new Map<string, number>()
+
+  const resetCounts = () => {
+    counts = new Map<string, number>()
+    for (const delimiter of DELIMITER_CANDIDATES) {
+      counts.set(delimiter, 0)
+    }
+  }
+
+  resetCounts()
+
+  let i = 0
+  while (i < text.length && lineCount < 5) {
+    const char = text[i]
+    if (char === '"') {
+      const nextChar = text[i + 1]
+      if (inQuotes && nextChar === '"') {
+        i += 1
+      } else {
+        inQuotes = !inQuotes
+      }
+    } else if (!inQuotes && (char === '\n' || char === '\r')) {
+      const best = pickDelimiter(counts)
+      if (best) return best
+      if (char === '\r' && text[i + 1] === '\n') {
+        i += 1
+      }
+      lineCount += 1
+      resetCounts()
+    } else if (!inQuotes) {
+      if (counts.has(char)) {
+        counts.set(char, (counts.get(char) ?? 0) + 1)
+      }
+    }
+    i += 1
+  }
+
+  return pickDelimiter(counts) ?? ','
+}
+
 function finalizeField(state: CsvParseState) {
   state.row.push(state.field)
   state.field = ''
@@ -53,7 +111,7 @@ function finalizeRow(state: CsvParseState) {
   state.row = []
 }
 
-function parseCsv(text: string) {
+function parseCsv(text: string, delimiter: string) {
   const state: CsvParseState = { rows: [], row: [], field: '', inQuotes: false }
 
   let i = 0
@@ -74,7 +132,7 @@ function parseCsv(text: string) {
     } else {
       if (char === '"') {
         state.inQuotes = true
-      } else if (char === ',') {
+      } else if (char === delimiter) {
         finalizeField(state)
       } else if (char === '\n') {
         finalizeRow(state)
@@ -100,7 +158,8 @@ function parseCsv(text: string) {
 }
 
 export function csvToCells(text: string, maxRows: number, maxCols: number) {
-  const rows = parseCsv(text)
+  const delimiter = detectDelimiter(text)
+  const rows = parseCsv(text, delimiter)
   const cells = new Map<string, string>()
 
   for (let row = 0; row < rows.length && row < maxRows; row += 1) {
