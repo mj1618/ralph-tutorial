@@ -476,6 +476,8 @@ const CanvasGrid = forwardRef<CanvasGridHandle>(function CanvasGrid(_, ref) {
 
   const totalWidth = GRID_CONFIG.cols * GRID_CONFIG.cellWidth
   const totalHeight = GRID_CONFIG.rows * GRID_CONFIG.cellHeight
+  const selectedKey = getCellKey(selection.row, selection.col)
+  const selectedDisplay = displayRef.current.get(selectedKey) ?? ''
 
   return (
     <div className="grid-shell">
@@ -494,6 +496,12 @@ const CanvasGrid = forwardRef<CanvasGridHandle>(function CanvasGrid(_, ref) {
         />
       </div>
       <canvas className="grid-canvas" ref={canvasRef} />
+      <div
+        className="grid-selection-meta"
+        data-selected-display={selectedDisplay}
+        aria-hidden="true"
+        style={{ display: 'none' }}
+      />
       {editingCell ? (
         <input
           ref={editorRef}

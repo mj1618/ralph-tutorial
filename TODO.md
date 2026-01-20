@@ -43,7 +43,7 @@ Build a fast, Excel-like spreadsheet app that runs entirely in the browser (with
   - [x] Unit tests for formula parser/evaluator and dependency graph
   - A small set of Playwright tests:
     - Edit cell, navigate, undo/redo
-    - Simple formula recalc when precedent changes
+    - [x] Simple formula recalc when precedent changes
   - [x] Copy/paste a 3x3 TSV block into grid
 
 **Definition of done (Phase 1)**: You can open the app, enter values and formulas, copy/paste blocks, undo/redo, refresh the page and keep your workbook, and it stays fast with ~50k visible cells.

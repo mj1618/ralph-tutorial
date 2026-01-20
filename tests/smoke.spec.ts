@@ -38,6 +38,55 @@ test('edit a cell and undo/redo changes', async ({ page }) => {
   await expect(editor).toHaveValue('123')
 })
 
+test('recalculate formula when precedent changes', async ({ page }) => {
+  await page.goto('/')
+
+  const grid = page.locator('.grid-scroll-container')
+  const selectionMeta = page.locator('.grid-selection-meta')
+  await expect(grid).toBeVisible()
+
+  const bounds = await grid.boundingBox()
+  if (!bounds) {
+    throw new Error('Grid container is not visible')
+  }
+
+  const cellWidth = 120
+  const cellHeight = 32
+  const padding = 10
+  const editor = page.locator('.cell-editor')
+
+  const cellPoint = (row: number, col: number) => ({
+    x: bounds.x + padding + col * cellWidth,
+    y: bounds.y + padding + row * cellHeight,
+  })
+
+  const setCell = async (row: number, col: number, value: string) => {
+    const point = cellPoint(row, col)
+    await page.mouse.dblclick(point.x, point.y)
+    await expect(editor).toHaveCount(1)
+    await editor.fill(value)
+    const commitPoint = cellPoint(row + 1, col)
+    await page.mouse.click(commitPoint.x, commitPoint.y)
+    await expect(editor).toHaveCount(0)
+  }
+
+  const selectCell = async (row: number, col: number) => {
+    const point = cellPoint(row, col)
+    await page.mouse.click(point.x, point.y)
+  }
+
+  await setCell(0, 0, '1')
+  await setCell(0, 1, '2')
+  await setCell(0, 2, '=A1+B1')
+
+  await selectCell(0, 2)
+  await expect(selectionMeta).toHaveAttribute('data-selected-display', '3')
+
+  await setCell(0, 0, '5')
+  await selectCell(0, 2)
+  await expect(selectionMeta).toHaveAttribute('data-selected-display', '7')
+})
+
 test('paste a 3x3 TSV block into grid', async ({ page }) => {
   await page.goto('/')
 
