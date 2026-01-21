@@ -1,6 +1,6 @@
 # Ralph Demo
 
-Using only what's in .scripts/ and .seed/ generated this repo which is an Excel clone in the browser.
+Using only what's in .scripts/ and .seed/ generated the `excel` branch which is an Excel clone in the browser.
 
 # Prerequisites
 
